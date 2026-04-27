@@ -64,23 +64,49 @@ create table if not exists user_prefs (
   updated_at          timestamptz default now()
 );
 
+-- Custom workout definitions (user-created routines)
+create table if not exists custom_workouts (
+  id               uuid        default gen_random_uuid() primary key,
+  user_id          uuid        references auth.users(id) on delete cascade not null,
+  name             text        not null,
+  duration_minutes integer     not null,
+  description      text,
+  created_at       timestamptz default now()
+);
+
+-- Daily completion tracking for custom workouts
+create table if not exists custom_workout_completions (
+  id          uuid        default gen_random_uuid() primary key,
+  user_id     uuid        references auth.users(id) on delete cascade not null,
+  workout_id  uuid        references custom_workouts(id) on delete cascade not null,
+  date        date        not null,
+  completed   boolean     default false,
+  unique(user_id, workout_id, date)
+);
+
 -- Indexes
 create index if not exists daily_logs_user_date on daily_logs(user_id, date desc);
 create index if not exists workouts_user_date   on workouts(user_id, date desc);
 create index if not exists weight_logs_user_date on weight_logs(user_id, date desc);
 create index if not exists bp_logs_user_date    on bp_logs(user_id, date desc);
+create index if not exists custom_workouts_user on custom_workouts(user_id, created_at);
+create index if not exists custom_workout_completions_user_date on custom_workout_completions(user_id, date desc);
 
 -- Enable Row Level Security
-alter table daily_logs   enable row level security;
-alter table workouts     enable row level security;
-alter table weight_logs  enable row level security;
-alter table bp_logs      enable row level security;
-alter table user_prefs   enable row level security;
+alter table daily_logs                  enable row level security;
+alter table workouts                    enable row level security;
+alter table weight_logs                 enable row level security;
+alter table bp_logs                     enable row level security;
+alter table user_prefs                  enable row level security;
+alter table custom_workouts             enable row level security;
+alter table custom_workout_completions  enable row level security;
 
 -- RLS Policies — users can only access their own rows
 
-create policy "daily_logs: own rows"  on daily_logs  for all using (auth.uid() = user_id);
-create policy "workouts: own rows"    on workouts     for all using (auth.uid() = user_id);
-create policy "weight_logs: own rows" on weight_logs  for all using (auth.uid() = user_id);
-create policy "bp_logs: own rows"     on bp_logs      for all using (auth.uid() = user_id);
-create policy "user_prefs: own rows"  on user_prefs   for all using (auth.uid() = user_id);
+create policy "daily_logs: own rows"                 on daily_logs                 for all using (auth.uid() = user_id);
+create policy "workouts: own rows"                   on workouts                   for all using (auth.uid() = user_id);
+create policy "weight_logs: own rows"                on weight_logs                for all using (auth.uid() = user_id);
+create policy "bp_logs: own rows"                    on bp_logs                    for all using (auth.uid() = user_id);
+create policy "user_prefs: own rows"                 on user_prefs                 for all using (auth.uid() = user_id);
+create policy "custom_workouts: own rows"            on custom_workouts            for all using (auth.uid() = user_id);
+create policy "custom_workout_completions: own rows" on custom_workout_completions for all using (auth.uid() = user_id);

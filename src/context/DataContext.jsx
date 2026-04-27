@@ -22,6 +22,8 @@ export function DataProvider({ children }) {
   const [todayLog, setTodayLog]   = useState(null)
   const [streak, setStreak]       = useState(0)
   const [loadingData, setLoading] = useState(true)
+  const [customWorkouts, setCustomWorkouts]       = useState([])
+  const [todayCompletions, setTodayCompletions]   = useState({})
 
   const loadTodayLog = useCallback(async () => {
     if (!user) return
@@ -98,16 +100,91 @@ export function DataProvider({ children }) {
     return upsertTodayLog({ is_lazy_day: true })
   }, [upsertTodayLog])
 
+  const loadCustomWorkouts = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('custom_workouts')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+    setCustomWorkouts(data || [])
+  }, [user])
+
+  const loadTodayCompletions = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('custom_workout_completions')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('date', TODAY)
+    const map = {}
+    data?.forEach(c => { map[c.workout_id] = c.completed })
+    setTodayCompletions(map)
+  }, [user])
+
+  const addCustomWorkout = useCallback(async (name, durationMinutes, description) => {
+    if (!user) return { error: new Error('Not authenticated') }
+    const { data, error } = await supabase
+      .from('custom_workouts')
+      .insert({
+        user_id: user.id,
+        name,
+        duration_minutes: durationMinutes,
+        description: description || null,
+      })
+      .select()
+      .single()
+    if (!error) setCustomWorkouts(prev => [...prev, data])
+    return { data, error }
+  }, [user])
+
+  const deleteCustomWorkout = useCallback(async (id) => {
+    if (!user) return { error: new Error('Not authenticated') }
+    const { error } = await supabase
+      .from('custom_workouts')
+      .delete()
+      .eq('id', id)
+    if (!error) {
+      setCustomWorkouts(prev => prev.filter(w => w.id !== id))
+      setTodayCompletions(prev => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    }
+    return { error }
+  }, [user])
+
+  const toggleCustomWorkout = useCallback(async (workoutId, current) => {
+    if (!user) return { error: new Error('Not authenticated') }
+    const { error } = await supabase
+      .from('custom_workout_completions')
+      .upsert(
+        { user_id: user.id, workout_id: workoutId, date: TODAY, completed: !current },
+        { onConflict: 'user_id,workout_id,date' }
+      )
+    if (!error) {
+      setTodayCompletions(prev => ({ ...prev, [workoutId]: !current }))
+    }
+    return { error }
+  }, [user])
+
   useEffect(() => {
     if (user) {
       setLoading(true)
-      Promise.all([loadTodayLog(), calculateStreak()]).finally(() => setLoading(false))
+      Promise.all([
+        loadTodayLog(),
+        calculateStreak(),
+        loadCustomWorkouts(),
+        loadTodayCompletions(),
+      ]).finally(() => setLoading(false))
     }
-  }, [user, loadTodayLog, calculateStreak])
+  }, [user, loadTodayLog, calculateStreak, loadCustomWorkouts, loadTodayCompletions])
 
-  const completedCount = todayLog
-    ? CHECKLIST_ITEMS.filter(i => todayLog[i.key]).length
-    : 0
+  const builtInCompleted = todayLog ? CHECKLIST_ITEMS.filter(i => todayLog[i.key]).length : 0
+  const customCompleted  = customWorkouts.filter(w => todayCompletions[w.id]).length
+  const completedCount   = builtInCompleted + customCompleted
+  const totalCount       = CHECKLIST_ITEMS.length + customWorkouts.length
 
   return (
     <DataContext.Provider value={{
@@ -115,10 +192,16 @@ export function DataProvider({ children }) {
       streak,
       loadingData,
       completedCount,
+      totalCount,
+      customWorkouts,
+      todayCompletions,
       toggleChecklistItem,
       markLazyDay,
       upsertTodayLog,
       loadTodayLog,
+      addCustomWorkout,
+      deleteCustomWorkout,
+      toggleCustomWorkout,
     }}>
       {children}
     </DataContext.Provider>

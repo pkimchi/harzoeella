@@ -7,13 +7,13 @@ import ProgressRing from '../components/ProgressRing'
 
 export default function Dashboard() {
   const { user }                    = useAuth()
-  const { todayLog, streak, completedCount } = useData()
+  const { todayLog, streak, completedCount, totalCount } = useData()
   const [recentWeight, setRecentWeight] = useState(null)
   const [recentBP, setRecentBP]         = useState(null)
   const [weekDots, setWeekDots]         = useState([])
   const [displayName, setDisplayName]   = useState('')
 
-  const pct = Math.round((completedCount / 5) * 100)
+  const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
 
   useEffect(() => {
     if (!user) return
@@ -97,7 +97,7 @@ export default function Dashboard() {
           </ProgressRing>
           <div className="text-center">
             <p className="text-xs font-medium text-gray-500">Today's checklist</p>
-            <p className="text-xs text-gray-400">{completedCount}/5 done</p>
+            <p className="text-xs text-gray-400">{completedCount}/{totalCount} done</p>
           </div>
         </div>
 
