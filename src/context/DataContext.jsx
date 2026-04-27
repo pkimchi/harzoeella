@@ -171,20 +171,23 @@ export function DataProvider({ children }) {
 
   const toggleCustomWorkout = useCallback(async (workoutId, current) => {
     if (!user) return { error: new Error('Not authenticated') }
+    const date = format(new Date(), 'yyyy-MM-dd')
     setTodayCompletions(prev => ({ ...prev, [workoutId]: !current }))
     const { error } = await supabase
       .from('custom_workout_completions')
       .upsert(
-        { user_id: user.id, workout_id: workoutId, date: TODAY, completed: !current },
+        { user_id: user.id, workout_id: workoutId, date, completed: !current },
         { onConflict: 'user_id,workout_id,date' }
       )
+      .select()
     if (error) {
       setTodayCompletions(prev => ({ ...prev, [workoutId]: current }))
     } else {
+      await loadTodayCompletions()
       calculateStreak()
     }
     return { error }
-  }, [user, calculateStreak])
+  }, [user, calculateStreak, loadTodayCompletions])
 
   useEffect(() => {
     if (user) {
