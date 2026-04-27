@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
-import { useData, CHECKLIST_ITEMS } from '../context/DataContext'
+import { useData, CHECKLIST_ITEMS, GOAL } from '../context/DataContext'
 import WorkoutTimer from '../components/WorkoutTimer'
 
 const DURATION_PRESETS = [10, 20, 30, 45, 60]
@@ -18,6 +18,7 @@ export default function Today() {
     todayLog, toggleChecklistItem, markLazyDay, upsertTodayLog,
     customWorkouts, todayCompletions, toggleCustomWorkout,
     addCustomWorkout, deleteCustomWorkout,
+    completedCount,
   } = useData()
 
   const [stepsInput, setStepsInput]   = useState('')
@@ -81,8 +82,15 @@ export default function Today() {
 
       {/* Daily Checklist */}
       <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-4 pt-4 pb-2">
+        <div className="px-4 pt-4 pb-2 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-800">Daily Checklist</h2>
+          {completedCount >= GOAL ? (
+            <span className="text-xs font-semibold text-brand-500 bg-brand-50 px-2.5 py-1 rounded-full">
+              {completedCount}/{GOAL} complete!
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400 font-medium">{completedCount}/{GOAL} done</span>
+          )}
         </div>
         <ul className="divide-y divide-gray-50">
           {/* Built-in items */}

@@ -15,7 +15,9 @@ const CHECKLIST_ITEMS = [
   { key: 'stretch',        label: 'Stretch',        icon: '🧘' },
 ]
 
-export { CHECKLIST_ITEMS, TODAY }
+const GOAL = 5
+
+export { CHECKLIST_ITEMS, GOAL, TODAY }
 
 export function DataProvider({ children }) {
   const { user }            = useAuth()
@@ -40,30 +42,42 @@ export function DataProvider({ children }) {
   const calculateStreak = useCallback(async () => {
     if (!user) return
     const since = format(subDays(new Date(), 120), 'yyyy-MM-dd')
-    const { data } = await supabase
-      .from('daily_logs')
-      .select('date, water, vitamins, healthy_eating, sleep_7hrs, stretch, is_lazy_day')
-      .eq('user_id', user.id)
-      .gte('date', since)
-      .order('date', { ascending: false })
+
+    const [{ data: logData }, { data: cwData }] = await Promise.all([
+      supabase
+        .from('daily_logs')
+        .select('date, water, vitamins, healthy_eating, sleep_7hrs, stretch, is_lazy_day')
+        .eq('user_id', user.id)
+        .gte('date', since)
+        .order('date', { ascending: false }),
+      supabase
+        .from('custom_workout_completions')
+        .select('date')
+        .eq('user_id', user.id)
+        .gte('date', since)
+        .eq('completed', true),
+    ])
 
     const logMap = {}
-    data?.forEach(l => { logMap[l.date] = l })
+    logData?.forEach(l => { logMap[l.date] = l })
+
+    const cwMap = {}
+    cwData?.forEach(c => { cwMap[c.date] = (cwMap[c.date] || 0) + 1 })
 
     let count = 0
-    // Start from yesterday if today has no activity yet; otherwise include today
     const todayEntry = logMap[TODAY]
-    const todayActive = todayEntry && (
-      todayEntry.is_lazy_day ||
-      CHECKLIST_ITEMS.some(i => todayEntry[i.key])
-    )
+    const todayBuiltIn = todayEntry ? CHECKLIST_ITEMS.filter(i => todayEntry[i.key]).length : 0
+    const todayCustom = cwMap[TODAY] || 0
+    const todayActive = todayEntry?.is_lazy_day || (todayBuiltIn + todayCustom) >= GOAL
     const startOffset = todayActive ? 0 : 1
 
     for (let i = startOffset; i <= 120; i++) {
       const d = format(subDays(new Date(), i), 'yyyy-MM-dd')
       const log = logMap[d]
-      if (!log) break
-      const hasActivity = log.is_lazy_day || CHECKLIST_ITEMS.some(item => log[item.key])
+      const customCount = cwMap[d] || 0
+      if (!log && customCount === 0) break
+      const builtIn = log ? CHECKLIST_ITEMS.filter(item => log[item.key]).length : 0
+      const hasActivity = log?.is_lazy_day || (builtIn + customCount) >= GOAL
       if (hasActivity) {
         count++
       } else {
@@ -157,17 +171,20 @@ export function DataProvider({ children }) {
 
   const toggleCustomWorkout = useCallback(async (workoutId, current) => {
     if (!user) return { error: new Error('Not authenticated') }
+    setTodayCompletions(prev => ({ ...prev, [workoutId]: !current }))
     const { error } = await supabase
       .from('custom_workout_completions')
       .upsert(
         { user_id: user.id, workout_id: workoutId, date: TODAY, completed: !current },
         { onConflict: 'user_id,workout_id,date' }
       )
-    if (!error) {
-      setTodayCompletions(prev => ({ ...prev, [workoutId]: !current }))
+    if (error) {
+      setTodayCompletions(prev => ({ ...prev, [workoutId]: current }))
+    } else {
+      calculateStreak()
     }
     return { error }
-  }, [user])
+  }, [user, calculateStreak])
 
   useEffect(() => {
     if (user) {
@@ -202,6 +219,7 @@ export function DataProvider({ children }) {
       addCustomWorkout,
       deleteCustomWorkout,
       toggleCustomWorkout,
+      goal: GOAL,
     }}>
       {children}
     </DataContext.Provider>

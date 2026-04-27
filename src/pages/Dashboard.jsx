@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { format, subDays } from 'date-fns'
 import { useAuth } from '../context/AuthContext'
-import { useData, CHECKLIST_ITEMS } from '../context/DataContext'
+import { useData, CHECKLIST_ITEMS, GOAL } from '../context/DataContext'
 import { supabase } from '../lib/supabase'
 import ProgressRing from '../components/ProgressRing'
 
@@ -13,7 +13,7 @@ export default function Dashboard() {
   const [weekDots, setWeekDots]         = useState([])
   const [displayName, setDisplayName]   = useState('')
 
-  const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+  const pct = Math.min(Math.round((completedCount / GOAL) * 100), 100)
 
   useEffect(() => {
     if (!user) return
@@ -32,36 +32,46 @@ export default function Dashboard() {
       .order('date', { ascending: false }).limit(1).maybeSingle()
       .then(({ data }) => setRecentBP(data))
 
-    // Last 7 days logs for dots
+    // Last 7 days logs for dots (built-in + custom workouts)
     const since = format(subDays(new Date(), 6), 'yyyy-MM-dd')
-    supabase.from('daily_logs')
-      .select('date, water, vitamins, healthy_eating, sleep_7hrs, stretch, is_lazy_day')
-      .eq('user_id', user.id)
-      .gte('date', since)
-      .order('date', { ascending: true })
-      .then(({ data }) => {
-        const logMap = {}
-        data?.forEach(l => { logMap[l.date] = l })
+    Promise.all([
+      supabase.from('daily_logs')
+        .select('date, water, vitamins, healthy_eating, sleep_7hrs, stretch, is_lazy_day')
+        .eq('user_id', user.id)
+        .gte('date', since)
+        .order('date', { ascending: true }),
+      supabase.from('custom_workout_completions')
+        .select('date')
+        .eq('user_id', user.id)
+        .gte('date', since)
+        .eq('completed', true),
+    ]).then(([{ data: logData }, { data: cwData }]) => {
+      const logMap = {}
+      logData?.forEach(l => { logMap[l.date] = l })
 
-        const dots = Array.from({ length: 7 }, (_, i) => {
-          const d    = format(subDays(new Date(), 6 - i), 'yyyy-MM-dd')
-          const log  = logMap[d]
-          const done = log ? CHECKLIST_ITEMS.filter(item => log[item.key]).length : 0
-          return {
-            date: d,
-            label: format(subDays(new Date(), 6 - i), 'EEE'),
-            done,
-            isLazy: log?.is_lazy_day,
-            isToday: d === format(new Date(), 'yyyy-MM-dd'),
-          }
-        })
-        setWeekDots(dots)
+      const cwMap = {}
+      cwData?.forEach(c => { cwMap[c.date] = (cwMap[c.date] || 0) + 1 })
+
+      const dots = Array.from({ length: 7 }, (_, i) => {
+        const d      = format(subDays(new Date(), 6 - i), 'yyyy-MM-dd')
+        const log    = logMap[d]
+        const builtIn = log ? CHECKLIST_ITEMS.filter(item => log[item.key]).length : 0
+        const custom  = cwMap[d] || 0
+        return {
+          date: d,
+          label: format(subDays(new Date(), 6 - i), 'EEE'),
+          done: builtIn + custom,
+          isLazy: log?.is_lazy_day,
+          isToday: d === format(new Date(), 'yyyy-MM-dd'),
+        }
       })
+      setWeekDots(dots)
+    })
   }, [user])
 
   const dotColor = (dot) => {
     if (dot.isLazy) return 'bg-blue-300'
-    if (dot.done === 5) return 'bg-brand-500'
+    if (dot.done >= GOAL) return 'bg-brand-500'
     if (dot.done >= 3) return 'bg-brand-300'
     if (dot.done >= 1) return 'bg-amber-400'
     if (new Date(dot.date) > new Date()) return 'bg-gray-100'
@@ -97,7 +107,7 @@ export default function Dashboard() {
           </ProgressRing>
           <div className="text-center">
             <p className="text-xs font-medium text-gray-500">Today's checklist</p>
-            <p className="text-xs text-gray-400">{completedCount}/{totalCount} done</p>
+            <p className="text-xs text-gray-400">{completedCount}/{GOAL} done</p>
           </div>
         </div>
 
@@ -151,7 +161,7 @@ export default function Dashboard() {
           ))}
         </div>
         <div className="flex gap-3 mt-3 text-[10px] text-gray-400">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-brand-500 inline-block"/>All 5</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-brand-500 inline-block"/>Goal (5+)</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>Partial</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-300 inline-block"/>Lazy day</span>
         </div>

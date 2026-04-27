@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { format, startOfWeek, addDays, subWeeks, subDays } from 'date-fns'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { useAuth } from '../context/AuthContext'
-import { useData, CHECKLIST_ITEMS } from '../context/DataContext'
+import { useData, CHECKLIST_ITEMS, GOAL } from '../context/DataContext'
 import { supabase } from '../lib/supabase'
 
 export default function WeeklySummary() {
@@ -22,24 +22,35 @@ export default function WeeklySummary() {
     const start = format(weekStart, 'yyyy-MM-dd')
     const end   = format(addDays(weekStart, 6), 'yyyy-MM-dd')
 
-    // Daily logs for this week
-    supabase.from('daily_logs')
-      .select('date, water, vitamins, healthy_eating, sleep_7hrs, stretch, is_lazy_day, steps')
-      .eq('user_id', user.id).gte('date', start).lte('date', end)
-      .then(({ data }) => {
-        const logMap = {}
-        data?.forEach(l => { logMap[l.date] = l })
+    // Daily logs + custom workout completions for this week
+    Promise.all([
+      supabase.from('daily_logs')
+        .select('date, water, vitamins, healthy_eating, sleep_7hrs, stretch, is_lazy_day, steps')
+        .eq('user_id', user.id).gte('date', start).lte('date', end),
+      supabase.from('custom_workout_completions')
+        .select('date')
+        .eq('user_id', user.id)
+        .gte('date', start)
+        .lte('date', end)
+        .eq('completed', true),
+    ]).then(([{ data: logData }, { data: cwData }]) => {
+      const logMap = {}
+      logData?.forEach(l => { logMap[l.date] = l })
 
-        const days = Array.from({ length: 7 }, (_, i) => {
-          const d    = format(addDays(weekStart, i), 'yyyy-MM-dd')
-          const log  = logMap[d]
-          const done = log ? CHECKLIST_ITEMS.filter(item => log[item.key]).length : 0
-          return { date: d, label: format(addDays(weekStart, i), 'EEE'), done, isLazy: log?.is_lazy_day, steps: log?.steps || 0 }
-        })
+      const cwMap = {}
+      cwData?.forEach(c => { cwMap[c.date] = (cwMap[c.date] || 0) + 1 })
 
-        setWeekData(days)
-        setTotalSteps(days.reduce((s, d) => s + d.steps, 0))
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d       = format(addDays(weekStart, i), 'yyyy-MM-dd')
+        const log     = logMap[d]
+        const builtIn = log ? CHECKLIST_ITEMS.filter(item => log[item.key]).length : 0
+        const custom  = cwMap[d] || 0
+        return { date: d, label: format(addDays(weekStart, i), 'EEE'), done: builtIn + custom, isLazy: log?.is_lazy_day, steps: log?.steps || 0 }
       })
+
+      setWeekData(days)
+      setTotalSteps(days.reduce((s, d) => s + d.steps, 0))
+    })
 
     // Workouts this week
     supabase.from('workouts').select('id').eq('user_id', user.id)
@@ -58,16 +69,16 @@ export default function WeeklySummary() {
       .then(({ data }) => setBpData(data || []))
   }, [user, weekOffset])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const completedDays = weekData.filter(d => d.done >= 3 || d.isLazy).length
+  const completedDays = weekData.filter(d => d.done >= GOAL || d.isLazy).length
   const totalDone     = weekData.reduce((s, d) => s + d.done, 0)
-  const weekPct       = Math.round((totalDone / (7 * 5)) * 100)
+  const weekPct       = Math.min(Math.round((totalDone / (7 * GOAL)) * 100), 100)
 
   const dotStyle = (day) => {
     const today = format(new Date(), 'yyyy-MM-dd')
     const isFuture = new Date(day.date) > new Date(today)
     if (isFuture) return 'bg-gray-100 border-2 border-gray-200'
     if (day.isLazy) return 'bg-blue-300'
-    if (day.done === 5) return 'bg-brand-500'
+    if (day.done >= GOAL) return 'bg-brand-500'
     if (day.done >= 3) return 'bg-brand-300'
     if (day.done >= 1) return 'bg-amber-400'
     return 'bg-gray-200'
@@ -119,10 +130,10 @@ export default function WeeklySummary() {
         <div className="flex justify-between items-end mb-1">
           {weekData.map(day => (
             <div key={day.date} className="flex flex-col items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-gray-500">{day.done}/5</span>
+              <span className="text-[10px] font-semibold text-gray-500">{day.done}/{GOAL}</span>
               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${dotStyle(day)}`}>
                 {day.isLazy && <span className="text-sm">😴</span>}
-                {!day.isLazy && day.done === 5 && <span className="text-sm text-white font-bold">✓</span>}
+                {!day.isLazy && day.done >= GOAL && <span className="text-sm text-white font-bold">✓</span>}
               </div>
               <span className="text-[10px] text-gray-400">{day.label}</span>
             </div>
