@@ -126,13 +126,17 @@ export function DataProvider({ children }) {
 
   const loadTodayCompletions = useCallback(async () => {
     if (!user) return
-    const { data } = await supabase
+    const today = format(new Date(), 'yyyy-MM-dd')
+    console.log('[loadTodayCompletions] fetching completions for date:', today)
+    const { data, error } = await supabase
       .from('custom_workout_completions')
       .select('*')
       .eq('user_id', user.id)
-      .eq('date', TODAY)
+      .eq('date', today)
+    console.log('[loadTodayCompletions] result:', { data, error, count: data?.length })
     const map = {}
     data?.forEach(c => { map[c.workout_id] = c.completed })
+    console.log('[loadTodayCompletions] completion map:', map)
     setTodayCompletions(map)
   }, [user])
 
@@ -172,22 +176,34 @@ export function DataProvider({ children }) {
   const toggleCustomWorkout = useCallback(async (workoutId, current) => {
     if (!user) return { error: new Error('Not authenticated') }
     const date = format(new Date(), 'yyyy-MM-dd')
+    console.log('[toggleCustomWorkout] called', { workoutId, current, date, userId: user.id })
+
+    // Optimistic update so UI responds immediately
     setTodayCompletions(prev => ({ ...prev, [workoutId]: !current }))
-    const { error } = await supabase
+
+    const { data, error } = await supabase
       .from('custom_workout_completions')
       .upsert(
         { user_id: user.id, workout_id: workoutId, date, completed: !current },
         { onConflict: 'user_id,workout_id,date' }
       )
       .select()
-    if (error) {
+
+    console.log('[toggleCustomWorkout] upsert result:', { data, error })
+
+    if (error || !data?.length) {
+      // Either a real error or a silent RLS block (Supabase returns 200 + empty data when
+      // an INSERT is blocked by a policy — error is null but no row is returned)
+      console.error('[toggleCustomWorkout] upsert failed or returned no data — reverting', { error, data })
       setTodayCompletions(prev => ({ ...prev, [workoutId]: current }))
     } else {
-      await loadTodayCompletions()
+      // Confirm state from the row Supabase actually wrote
+      console.log('[toggleCustomWorkout] upsert succeeded, saved row:', data[0])
+      setTodayCompletions(prev => ({ ...prev, [workoutId]: data[0].completed }))
       calculateStreak()
     }
     return { error }
-  }, [user, calculateStreak, loadTodayCompletions])
+  }, [user, calculateStreak])
 
   useEffect(() => {
     if (user) {
